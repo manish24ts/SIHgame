@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garden Guardians</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap');
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background-color: #3a2d21;
+        }
+
+        #game-container {
+            font-family: 'Luckiest Guy', cursive;
+            letter-spacing: 1px;
+            background-image: url('loamy_soil_bg.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            touch-action: none;
+        }
+
+        #game-canvas {
+            /* THE FIX: Restore the original blend mode and add a white background. */
+            /* This makes the sprites opaque, while the blend mode removes the white canvas background. */
+            background-color: white;
+            mix-blend-mode: multiply;
+        }
+
+        .plant-card {
+            background-image: url('plant_card.png');
+            background-size: cover;
+            background-position: center;
+            border: 4px solid #4a3c2a;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+
+        .plant-card.selected {
+            transform: scale(1.1);
+            border-color: #f59e0b;
+            box-shadow: 0 0 20px #f59e0b;
+        }
+        
+        .plant-card.disabled {
+            filter: grayscale(1) brightness(0.7);
+            cursor: not-allowed;
+        }
+
+        #sun-display {
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 3px solid #fde047;
+            color: #fde047;
+        }
+
+        .sun-resource {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            background: radial-gradient(circle, rgba(255,255,100,1) 0%, rgba(253,186,14,1) 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 0 15px yellow;
+            border: 3px solid white;
+        }
+        
+        .sun-resource:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 30px yellow;
+        }
+
+        .message-box {
+            background: rgba(0,0,0,0.8);
+            border-top: 5px solid #f59e0b;
+        }
+        
+        .tooltip {
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s;
+            position: absolute;
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+            bottom: 110%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 250px;
+            text-align: center;
+            font-size: 0.9rem;
+            pointer-events: none;
+        }
+        
+        .has-tooltip:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-800 flex items-center justify-center h-screen">
+
+    <div id="game-wrapper" class="relative w-full max-w-5xl aspect-[16/9] shadow-2xl">
+        
+        <div id="ui-bar" class="absolute top-0 left-0 w-full h-[120px] bg-yellow-900/50 p-2 flex items-center z-20 shadow-lg">
+            <div id="sun-display" class="px-6 py-3 rounded-full flex items-center text-4xl shadow-md">
+                ☀️
+                <span id="sun-count" class="ml-4">50</span>
+            </div>
+            
+            <div class="flex-grow flex items-center justify-center space-x-4">
+                <div id="card-marigold" data-plant="marigold" data-cost="100" class="plant-card has-tooltip w-20 h-24 rounded-lg flex flex-col items-center justify-center p-1 text-white">
+                    <img src="marigold_plant.png" class="w-16 h-16 object-contain" alt="Marigold">
+                    <span class="font-bold text-lg">100</span>
+                     <div class="tooltip">
+                         <p class="font-bold text-amber-400">Marigold</p>
+                         Marigolds release a chemical that repels many garden pests like aphids! Shoots petals at a steady rate.
+                     </div>
+                </div>
+                <div id="card-garlic" data-plant="garlic" data-cost="75" class="plant-card has-tooltip w-20 h-24 rounded-lg flex flex-col items-center justify-center p-1 text-white">
+                    <img src="garlic_bulb.png" class="w-16 h-16 object-contain" alt="Garlic">
+                    <span class="font-bold text-lg">75</span>
+                    <div class="tooltip">
+                         <p class="font-bold text-purple-400">Garlic</p>
+                         The strong smell of garlic confuses and deters pests, protecting your garden. It lobs powerful garlic cloves.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="game-container" class="relative w-full h-full">
+            <canvas id="game-canvas" class="absolute top-0 left-0"></canvas>
+        </div>
+        
+        <div id="message-container" class="absolute inset-0 z-50 flex items-center justify-center hidden">
+            <div class="message-box text-white p-10 rounded-lg shadow-2xl text-center">
+                <h2 id="message-title" class="text-4xl font-bold mb-4 text-yellow-400"></h2>
+                <p id="message-text" class="text-lg mb-6"></p>
+                <button id="message-button" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-8 rounded-full text-2xl transition-transform transform hover:scale-105">Start Game</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('game-container');
+        
+        const sunCountDisplay = document.getElementById('sun-count');
+        const plantCards = document.querySelectorAll('.plant-card');
+        const messageContainer = document.getElementById('message-container');
+        const messageTitle = document.getElementById('message-title');
+        const messageText = document.getElementById('message-text');
+        const messageButton = document.getElementById('message-button');
+
+        let sun = 200;
+        let pests = [];
+        let plants = [];
+        let projectiles = [];
+        let sunResources = [];
+        let frame = 0;
+        let pestsInterval = 300;
+        let sunInterval = 400;
+        let gameOver = false;
+        let gameStarted = false;
+        let selectedPlant = null;
+        let score = 0;
+        let pestsToDefeat = 30;
+
+        const gridRows = 5;
+        const gridCols = 9;
+        let grid = [];
+        let cellWidth, cellHeight;
+
+        const images = {};
+        const imageUrls = {
+            aphid: 'aphid_pest.png',
+            marigold: 'marigold_plant.png',
+            garlic: 'garlic_bulb.png',
+            marigoldProjectile: 'marigold_flower.png'
+        };
+
+        function loadImages(callback) {
+            let loaded = 0;
+            const numImages = Object.keys(imageUrls).length;
+            for (const key in imageUrls) {
+                images[key] = new Image();
+                images[key].src = imageUrls[key];
+                images[key].onload = () => {
+                    loaded++;
+                    if (loaded === numImages) {
+                        callback();
+                    }
+                };
+            }
+        }
+
+        class Plant {
+            constructor(x, y, plantType) {
+                this.x = x;
+                this.y = y;
+                this.width = cellWidth * 0.7;
+                this.height = cellHeight * 0.7;
+                this.health = 100;
+                this.plantType = plantType;
+                this.shootTimer = 0;
+                this.initProperties();
+            }
+
+            initProperties() {
+                switch(this.plantType) {
+                    case 'marigold':
+                        this.shootInterval = 120;
+                        this.projectileType = 'marigoldProjectile';
+                        this.projectileSpeed = 5;
+                        this.damage = 25;
+                        break;
+                    case 'garlic':
+                        this.shootInterval = 180;
+                        this.projectileType = 'garlicProjectile';
+                        this.projectileSpeed = 4;
+                        this.damage = 50;
+                        break;
+                }
+            }
+
+            draw() {
+                 if (images[this.plantType]) {
+                     ctx.drawImage(images[this.plantType], this.x + (cellWidth - this.width) / 2, this.y + (cellHeight - this.height) / 2, this.width, this.height);
+                 }
+            }
+            
+            update() {
+                this.shootTimer++;
+                const pestInRow = pests.some(pest => Math.floor(pest.y / cellHeight) === Math.floor(this.y / cellHeight));
+                if (pestInRow && this.shootTimer >= this.shootInterval) {
+                    projectiles.push(new Projectile(this.x + this.width, this.y + this.height / 2, this.projectileType, this.damage, this.projectileSpeed, this.plantType));
+                    this.shootTimer = 0;
+                }
+            }
+        }
+        
+        class Pest {
+            constructor(y) {
+                this.x = canvas.width;
+                this.y = y;
+                this.width = cellWidth * 0.6;
+                this.height = cellHeight * 0.6;
+                this.speed = Math.random() * 0.3 + 0.4;
+                this.health = 100;
+            }
+
+            draw() {
+                if (images.aphid) {
+                    ctx.drawImage(images.aphid, this.x, this.y + (cellHeight - this.height)/2, this.width, this.height);
+                }
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x, this.y, this.width, 5);
+                ctx.fillStyle = 'green';
+                ctx.fillRect(this.x, this.y, this.width * (this.health / 100), 5);
+            }
+
+            update() {
+                this.x -= this.speed;
+                if (this.x < 0) {
+                    endGame(false);
+                }
+            }
+        }
+        
+        class Projectile {
+             constructor(x, y, type, damage, speed, plantType) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.damage = damage;
+                this.speed = speed;
+                this.plantType = plantType;
+                this.width = 40;
+                this.height = 40;
+                this.rotation = 0;
+                
+                this.startY = y;
+                this.lobHeight = -50;
+                this.lobProgress = 0;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                if (this.type === 'marigoldProjectile') {
+                    this.rotation += 0.1;
+                    ctx.rotate(this.rotation);
+                    if (images.marigoldProjectile) {
+                         ctx.drawImage(images.marigoldProjectile, -this.width/2, -this.height/2, this.width, this.height);
+                    }
+                } else if(this.type === 'garlicProjectile') {
+                    ctx.fillStyle = '#d1d1c8';
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, 10, 15, 0, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.fillStyle = 'green';
+                    ctx.fillRect(-3, -20, 6, 10);
+                }
+                ctx.restore();
+            }
+
+            update() {
+                if (this.plantType === 'garlic') {
+                    this.x += this.speed;
+                    this.lobProgress += 0.03;
+                    if (this.lobProgress > 1) this.lobProgress = 1;
+                     this.y = this.startY + this.lobHeight * Math.sin(this.lobProgress * Math.PI);
+                } else {
+                    this.x += this.speed;
+                }
+            }
+        }
+        
+        function setupGrid() {
+            grid = [];
+            for (let y = 0; y < gridRows; y++) {
+                let row = [];
+                for (let x = 0; x < gridCols; x++) {
+                    row.push({ x: x * cellWidth, y: y * cellHeight, occupied: false });
+                }
+                grid.push(row);
+            }
+        }
+
+        function handlePests() {
+            for (let i = pests.length - 1; i >= 0; i--) {
+                pests[i].update();
+                pests[i].draw();
+                if (pests[i].health <= 0) {
+                    pests.splice(i, 1);
+                    score++;
+                    if(score >= pestsToDefeat){
+                        endGame(true);
+                    }
+                }
+            }
+            if (frame % pestsInterval === 0 && pestsToDefeat - score > 0) {
+                 if(pests.length < 10) {
+                    const randomRow = Math.floor(Math.random() * gridRows);
+                    pests.push(new Pest(randomRow * cellHeight));
+                    if (pestsInterval > 120) pestsInterval -= 10;
+                 }
+            }
+        }
+
+        function handlePlants() {
+            plants.forEach(plant => {
+                plant.update();
+                plant.draw();
+            });
+        }
+        
+        function handleProjectiles() {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                projectiles[i].update();
+                projectiles[i].draw();
+
+                for (let j = pests.length - 1; j >= 0; j--) {
+                    if (isColliding(projectiles[i], pests[j])) {
+                        pests[j].health -= projectiles[i].damage;
+                        projectiles.splice(i, 1);
+                        break;
+                    }
+                }
+                
+                if (projectiles[i] && projectiles[i].x > canvas.width) {
+                    projectiles.splice(i, 1);
+                }
+            }
+        }
+
+        function handleSun() {
+             for (let i = sunResources.length - 1; i >= 0; i--) {
+                const sunEl = sunResources[i];
+                let currentTop = parseFloat(sunEl.style.top);
+                const finalTop = parseFloat(sunEl.dataset.finalTop);
+
+                if(currentTop < finalTop){
+                    sunEl.style.top = `${currentTop + 1}px`;
+                }
+             }
+
+             if (frame % sunInterval === 0) {
+                const sunEl = document.createElement('div');
+                sunEl.className = 'sun-resource';
+                const xPos = Math.random() * (gameContainer.clientWidth - 70);
+                const finalYPos = Math.random() * (gameContainer.clientHeight - 150) + 80;
+
+                sunEl.style.left = `${xPos}px`;
+                sunEl.style.top = `-70px`;
+                sunEl.dataset.finalTop = finalYPos;
+                
+                sunEl.onclick = () => {
+                    collectSun(sunEl, 25);
+                };
+
+                gameContainer.appendChild(sunEl);
+                sunResources.push(sunEl);
+                setTimeout(() => {
+                    if(sunEl.parentElement) {
+                       sunEl.parentElement.removeChild(sunEl);
+                       sunResources = sunResources.filter(s => s !== sunEl);
+                    }
+                }, 8000);
+            }
+        }
+
+        function collectSun(sunEl, amount) {
+             if(sunEl.parentElement) {
+                sunEl.parentElement.removeChild(sunEl);
+                sunResources = sunResources.filter(s => s !== sunEl);
+                sun += amount;
+                updateSunDisplay();
+             }
+        }
+
+        function isColliding(obj1, obj2) {
+            return obj1.x < obj2.x + obj2.width &&
+                   obj1.x + obj1.width > obj2.x &&
+                   obj1.y < obj2.y + obj2.height &&
+                   obj1.y + obj1.height > obj2.y;
+        }
+
+        function updateSunDisplay() {
+            sunCountDisplay.textContent = sun;
+             plantCards.forEach(card => {
+                const cost = parseInt(card.dataset.cost);
+                if (sun < cost) {
+                    card.classList.add('disabled');
+                } else {
+                    card.classList.remove('disabled');
+                }
+            });
+        }
+        
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let i = 0; i < gridRows; i++) {
+                for (let j = 0; j < gridCols; j++) {
+                    ctx.strokeRect(j * cellWidth, i * cellHeight, cellWidth, cellHeight);
+                }
+            }
+        }
+
+        function animate() {
+            if (gameOver || !gameStarted) return;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            handlePests();
+            handlePlants();
+            handleProjectiles();
+            handleSun();
+            
+            frame++;
+            requestAnimationFrame(animate);
+        }
+
+        function resizeCanvas() {
+            canvas.width = gameContainer.clientWidth;
+            canvas.height = gameContainer.clientHeight;
+            cellWidth = canvas.width / gridCols;
+            cellHeight = canvas.height / gridRows;
+            setupGrid();
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        
+        plantCards.forEach(card => {
+            card.addEventListener('click', () => {
+                const cost = parseInt(card.dataset.cost);
+                if (sun >= cost) {
+                    selectedPlant = {
+                        type: card.dataset.plant,
+                        cost: cost
+                    };
+                    plantCards.forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                }
+            });
+        });
+        
+        canvas.addEventListener('click', (e) => {
+            if (!selectedPlant) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const gridX = Math.floor(mouseX / cellWidth);
+            const gridY = Math.floor(mouseY / cellHeight);
+
+            if (gridX < gridCols && gridY < gridRows && !grid[gridY][gridX].occupied) {
+                plants.push(new Plant(gridX * cellWidth, gridY * cellHeight, selectedPlant.type));
+                grid[gridY][gridX].occupied = true;
+                sun -= selectedPlant.cost;
+                updateSunDisplay();
+                
+                selectedPlant = null;
+                plantCards.forEach(c => c.classList.remove('selected'));
+            }
+        });
+        
+        messageButton.addEventListener('click', () => {
+            if (gameOver) {
+                location.reload();
+            } else {
+                gameStarted = true;
+                gameOver = false;
+                messageContainer.classList.add('hidden');
+                animate();
+            }
+        });
+        
+        function showMessage(title, text, buttonText) {
+             messageTitle.textContent = title;
+             messageText.innerHTML = text;
+             messageButton.textContent = buttonText;
+             messageContainer.classList.remove('hidden');
+         }
+
+        function endGame(isWin) {
+            gameOver = true;
+            if (isWin) {
+                showMessage('Congratulations!', `You protected your garden from ${pestsToDefeat} pests! You're a true Garden Guardian.<br>Score: ${score}`, 'Play Again?');
+            } else {
+                showMessage('Oh No!', `The aphids got through and ate your precious plants! Try again to protect your garden.<br>Score: ${score}`, 'Try Again');
+            }
+        }
+
+        function init() {
+            loadImages(() => {
+                resizeCanvas();
+                updateSunDisplay();
+                showMessage('Welcome to Garden Guardians!', 'Aphids are attacking! Plant organic defenders like marigolds and garlic to protect your garden. <br>Collect sun to afford new plants. Good luck!', 'Start Game');
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
